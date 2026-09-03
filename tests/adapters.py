@@ -9,6 +9,7 @@ from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizerBase
 
 from cs336_alignment.checkpoint import tokenize_prompt_and_output, get_response_log_probs
+from cs336_alignment.grpo import compute_rollout_rewards
 
 def run_tokenize_prompt_and_output(
     prompt_strs: list[str],
@@ -114,7 +115,7 @@ def run_compute_rollout_rewards(
                 Reward statistics to log. At minimum, include the mean total
                 and format rewards over the rollout batch.
     """
-    raise NotImplementedError
+    return compute_rollout_rewards(reward_fn, rollout_responses, repeated_ground_truths)
 
 
 def run_compute_group_normalized_rewards(
