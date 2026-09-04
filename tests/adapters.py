@@ -10,6 +10,7 @@ from transformers import PreTrainedTokenizerBase
 
 from cs336_alignment.checkpoint import tokenize_prompt_and_output, get_response_log_probs
 from cs336_alignment.grpo import (
+    aggregate_loss_across_microbatch,
     compute_group_normalized_rewards,
     compute_policy_gradient_loss,
     compute_rollout_rewards,
@@ -246,7 +247,9 @@ def run_aggregate_loss_across_microbatch(
             A scalar containing the average loss. Make sure you can later call
             backward on this loss.
     """
-    raise NotImplementedError
+    return aggregate_loss_across_microbatch(
+        per_token_policy_gradient_loss, mask, loss_normalization, normalization_constant
+    )
 
 
 def run_grpo_train_step(

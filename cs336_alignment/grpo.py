@@ -59,3 +59,16 @@ def compute_policy_gradient_loss(
         raise NotImplementedError("Only on-policy loss without reweighting is supported.")
     del old_log_probs, cliprange, response_mask
     return -raw_rewards_or_advantages.reshape(-1, 1) * policy_log_probs, {}
+
+# A microbatch is a memory-sized subset of rollout responses and may contain multiple GRPO groups.
+def aggregate_loss_across_microbatch(
+    per_token_policy_gradient_loss: torch.Tensor,
+    mask: torch.Tensor,
+    loss_normalization: Literal["sequence", "constant"] = "sequence",
+    normalization_constant: int | None = None,
+) -> torch.Tensor:
+    if loss_normalization != "sequence":
+        raise NotImplementedError("Only sequence normalization is supported.")
+    del normalization_constant
+    sequence_losses = (per_token_policy_gradient_loss * mask).sum(dim=1) / mask.sum(dim=1)
+    return sequence_losses.mean()
