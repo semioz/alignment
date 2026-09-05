@@ -68,6 +68,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sampling-temperature", type=float, default=1.0)
     parser.add_argument("--sampling-max-tokens", type=int, default=512)
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
+    parser.add_argument("--baseline", choices=("mean", "none"), default="mean")
+    parser.add_argument(
+        "--advantage-normalizer", choices=("std", "none", "mean"), default="std"
+    )
+    parser.add_argument(
+        "--loss-normalization", choices=("sequence", "constant"), default="sequence"
+    )
+    parser.add_argument("--normalization-constant", type=int)
     parser.add_argument("--eval-interval", type=int, default=10)
     parser.add_argument("--rollout-log-interval", type=int, default=40)
     parser.add_argument("--policy-device", default="cuda:0")
@@ -85,6 +93,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("rollout_batch_size must be divisible by group_size.")
     if args.train_batch_size % args.gradient_accumulation_steps:
         raise ValueError("train_batch_size must divide evenly into gradient accumulation steps.")
+    if args.loss_normalization == "constant" and args.normalization_constant is None:
+        args.normalization_constant = args.train_batch_size * args.sampling_max_tokens
 
 
 def evaluate(
@@ -160,6 +170,10 @@ def main() -> None:
                 responses,
                 ground_truths,
                 args.group_size,
+                baseline=args.baseline,
+                advantage_normalizer=args.advantage_normalizer,
+                loss_normalization=args.loss_normalization,
+                normalization_constant=args.normalization_constant,
             )
             metrics: dict[str, Any] = {
                 "step": step,

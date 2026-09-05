@@ -128,9 +128,14 @@ def grpo_train_step(
 
     for start in range(0, len(rollout_responses), microbatch_size):
         end = start + microbatch_size
-        tokenized = tokenize_prompt_and_output(
-            repeated_prompts[start:end], rollout_responses[start:end], tokenizer
-        )
+        microbatch_advantages = advantages[start:end]
+        active = microbatch_advantages != 0
+        if not active.any():
+            continue
+        active_indices = active.nonzero(as_tuple=True)[0].tolist()
+        prompts = [repeated_prompts[start + index] for index in active_indices]
+        responses = [rollout_responses[start + index] for index in active_indices]
+        tokenized = tokenize_prompt_and_output(prompts, responses, tokenizer)
         input_ids = tokenized["input_ids"].to(device)
         labels = tokenized["labels"].to(device)
         response_mask = tokenized["response_mask"].to(device)
@@ -138,7 +143,7 @@ def grpo_train_step(
             model, input_ids, labels, return_token_entropy=True
         )
         per_token_loss, _ = compute_policy_gradient_loss(
-            advantages[start:end].to(device),
+            microbatch_advantages[active].to(device),
             log_prob_output["log_probs"],
             importance_reweighting_method,
             old_log_probs,
@@ -147,7 +152,8 @@ def grpo_train_step(
         microbatch_loss = aggregate_loss_across_microbatch(
             per_token_loss, response_mask, loss_normalization, normalization_constant
         )
-        (microbatch_loss / gradient_accumulation_steps).backward()
+        backward_scale = 1 if loss_normalization == "constant" else gradient_accumulation_steps
+        (microbatch_loss / backward_scale).backward()
         microbatch_losses.append(microbatch_loss.detach())
         token_entropies.append(
             (log_prob_output["token_entropy"] * response_mask).sum()
@@ -162,7 +168,7 @@ def grpo_train_step(
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
     optimizer.step()
     optimizer.zero_grad(set_to_none=True)
-    loss = torch.stack(microbatch_losses).mean()
+    loss = torch.stack(microbatch_losses).sum() if loss_normalization == "constant" else torch.stack(microbatch_losses).mean()
     return loss, {
         **reward_metadata,
         **advantage_metadata,
