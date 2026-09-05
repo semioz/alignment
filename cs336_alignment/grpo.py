@@ -50,6 +50,8 @@ def compute_group_normalized_rewards(
 
     if advantage_normalizer == "std":
         advantages = advantages / (group_stds + advantage_eps)
+    elif advantage_normalizer == "mean":
+        advantages = advantages / (group_means + advantage_eps)
     elif advantage_normalizer != "none":
         raise ValueError(f"Unsupported advantage normalizer: {advantage_normalizer}")
     advantages = advantages.reshape(-1)
