@@ -35,15 +35,24 @@ def compute_group_normalized_rewards(
     advantage_eps: float = 1e-6,
     advantage_normalizer: Literal["std", "none", "mean"] = "std",
 ) -> tuple[torch.Tensor, dict[str, float]]:
-    if baseline != "mean" or advantage_normalizer != "std":
-        raise NotImplementedError("Only mean baseline with std normalization is supported.")
     if group_size <= 0 or raw_rewards.numel() % group_size:
         raise ValueError("raw_rewards must divide evenly into positive-size groups.")
 
     grouped_rewards = raw_rewards.reshape(-1, group_size)
     group_means = grouped_rewards.mean(dim=1, keepdim=True)
     group_stds = grouped_rewards.std(dim=1, keepdim=True)
-    advantages = ((grouped_rewards - group_means) / (group_stds + advantage_eps)).reshape(-1)
+    if baseline == "mean":
+        advantages = grouped_rewards - group_means
+    elif baseline == "none":
+        advantages = grouped_rewards
+    else:
+        raise ValueError(f"Unsupported baseline: {baseline}")
+
+    if advantage_normalizer == "std":
+        advantages = advantages / (group_stds + advantage_eps)
+    elif advantage_normalizer != "none":
+        raise ValueError(f"Unsupported advantage normalizer: {advantage_normalizer}")
+    advantages = advantages.reshape(-1)
     return advantages, {
         "mean_reward": raw_rewards.mean().item(),
         "mean_group_std": group_stds.mean().item(),
