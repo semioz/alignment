@@ -199,9 +199,10 @@ def generate_completions(
             "temperature": sampling_params["temperature"],
             "max_tokens": sampling_params["max_tokens"],
             "n": sampling_params["n"],
-            "seed": sampling_params["seed"],
             "return_token_ids": True,
         }
+        if sampling_params.get("seed") is not None:
+            payload["seed"] = sampling_params["seed"]
         if sampling_params.get("stop") is not None:
             payload["stop"] = sampling_params["stop"]
             payload["include_stop_str_in_output"] = sampling_params.get("include_stop_str_in_output", False)

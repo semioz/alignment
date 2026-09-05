@@ -80,10 +80,12 @@ def aggregate_loss_across_microbatch(
     loss_normalization: Literal["sequence", "constant"] = "sequence",
     normalization_constant: int | None = None,
 ) -> torch.Tensor:
-    if loss_normalization != "sequence":
-        raise NotImplementedError("Only sequence normalization is supported.")
-    del normalization_constant
-    sequence_losses = (per_token_policy_gradient_loss * mask).sum(dim=1) / mask.sum(dim=1)
+    masked_losses = per_token_policy_gradient_loss * mask
+    if loss_normalization == "constant":
+        if normalization_constant is None:
+            raise ValueError("normalization_constant is required for constant normalization.")
+        return masked_losses.sum() / normalization_constant
+    sequence_losses = masked_losses.sum(dim=1) / mask.sum(dim=1)
     return sequence_losses.mean()
 
 
