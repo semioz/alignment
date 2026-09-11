@@ -240,3 +240,11 @@ Importance sampling this expectation with \(y\sim\pi_0\) gives the ratio \(\tild
 The training script accepts `--importance-reweighting-method noclip|grpo` and `--cliprange`. After generating a rollout and before the optimizer update, it scores the exact prompt-response sequences with the current pre-update policy under `torch.no_grad()` and saves these values as `old_log_probs`. `grpo_train_step` aligns these stale log probabilities with each active microbatch before calculating the new token probabilities and the ratio.
 
 Verified locally: on-policy loss, token-level `noclip` and `grpo` losses, `noclip` and `grpo` train-step variants, and script CLI tests all pass. GSPO remains intentionally unimplemented because it is the separate sequence-level-reweighting problem.
+
+## 11-) Bias--variance trade-off in importance reweighting
+
+No importance reweighting has the lowest variance because it introduces no likelihood-ratio weights, but it is the most biased whenever the current policy has moved away from the stale rollout policy. It is reasonable when rollouts are nearly on-policy, such as after a small update or frequent weight synchronization.
+
+PPO/GRPO-style token-level reweighting corrects each token by its own old-to-new likelihood ratio. It reduces the stale-policy bias relative to no reweighting, while clipping prevents rare large ratios from dominating an update. Clipping and ignoring the rest of the sequence still leave bias, but this is often a useful middle ground for moderately stale data and stable training.
+
+GSPO uses one clipped sequence-level ratio, formed from the geometric mean of token ratios. It better reflects how the current policy differs over the complete response, including prefix and suffix changes that token-level reweighting ignores. This can reduce trajectory-level bias, especially for long reasoning responses whose reward depends on the whole sequence. However, it is more sensitive to noisy log-ratio estimates across the response and can have higher variance; the geometric mean and clipping deliberately temper this instability. Thus the usual spectrum is: no reweighting has lowest variance and highest bias, clipped token-level reweighting is a middle ground, and clipped GSPO aims for more trajectory-faithful correction at potentially higher variance.

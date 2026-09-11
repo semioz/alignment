@@ -99,7 +99,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--normalization-constant", type=int)
     parser.add_argument(
         "--importance-reweighting-method",
-        choices=("none", "noclip", "grpo"),
+        choices=("none", "noclip", "grpo", "gspo"),
         default="none",
     )
     parser.add_argument("--cliprange", type=float)
@@ -122,8 +122,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("train_batch_size must divide evenly into gradient accumulation steps.")
     if args.loss_normalization == "constant" and args.normalization_constant is None:
         args.normalization_constant = args.train_batch_size * args.sampling_max_tokens
-    if args.importance_reweighting_method == "grpo" and args.cliprange is None:
-        raise ValueError("cliprange is required for GRPO importance reweighting.")
+    if args.importance_reweighting_method in ("grpo", "gspo") and args.cliprange is None:
+        raise ValueError("cliprange is required for clipped importance reweighting.")
 
 
 def evaluate(

@@ -72,10 +72,21 @@ def compute_policy_gradient_loss(
     advantages = raw_rewards_or_advantages.reshape(-1, 1)
     if importance_reweighting_method == "none":
         return -advantages * policy_log_probs, {}
-    if importance_reweighting_method not in ("noclip", "grpo"):
+    if importance_reweighting_method not in ("noclip", "grpo", "gspo"):
         raise NotImplementedError(f"Unsupported reweighting method: {importance_reweighting_method}")
     if old_log_probs is None:
         raise ValueError("old_log_probs is required for off-policy reweighting.")
+    if importance_reweighting_method == "gspo":
+        if cliprange is None or response_mask is None:
+            raise ValueError("cliprange and response_mask are required for GSPO.")
+        log_ratio = ((policy_log_probs - old_log_probs) * response_mask).sum(dim=1, keepdim=True)
+        log_ratio = log_ratio / response_mask.sum(dim=1, keepdim=True)
+        ratios = torch.exp(log_ratio)
+        objective = torch.minimum(
+            ratios * advantages,
+            ratios.clamp(1 - cliprange, 1 + cliprange) * advantages,
+        )
+        return -objective.expand_as(policy_log_probs), {}
 
     ratios = torch.exp(policy_log_probs - old_log_probs)
     objective = ratios * advantages
@@ -168,6 +179,7 @@ def grpo_train_step(
             importance_reweighting_method,
             microbatch_old_log_probs,
             cliprange,
+            response_mask,
         )
         microbatch_loss = aggregate_loss_across_microbatch(
             per_token_loss, response_mask, loss_normalization, normalization_constant
