@@ -12,7 +12,11 @@ from typing import Any
 
 import torch
 
-from cs336_alignment.checkpoint import get_model_and_tokenizer
+from cs336_alignment.checkpoint import (
+    get_model_and_tokenizer,
+    get_response_log_probs,
+    tokenize_prompt_and_output,
+)
 from cs336_alignment.drgrpo_grader import question_only_reward_fn, r1_zero_reward_fn
 from cs336_alignment.grpo import grpo_train_step
 from cs336_alignment.prompting_eval import prompt_filename, render_prompt
@@ -42,6 +46,23 @@ def make_sampling_params(
         params["stop"] = ["</answer>"]
         params["include_stop_str_in_output"] = True
     return params
+
+
+def get_old_response_log_probs(
+    policy: torch.nn.Module,
+    tokenizer: Any,
+    prompts: list[str],
+    responses: list[str],
+) -> torch.Tensor:
+    tokenized = tokenize_prompt_and_output(prompts, responses, tokenizer)
+    device = next(policy.parameters()).device
+    with torch.no_grad():
+        return get_response_log_probs(
+            policy,
+            tokenized["input_ids"].to(device),
+            tokenized["labels"].to(device),
+            return_token_entropy=False,
+        )["log_probs"].cpu()
 
 
 def parse_args() -> argparse.Namespace:
@@ -76,6 +97,12 @@ def parse_args() -> argparse.Namespace:
         "--loss-normalization", choices=("sequence", "constant"), default="sequence"
     )
     parser.add_argument("--normalization-constant", type=int)
+    parser.add_argument(
+        "--importance-reweighting-method",
+        choices=("none", "noclip", "grpo"),
+        default="none",
+    )
+    parser.add_argument("--cliprange", type=float)
     parser.add_argument("--eval-interval", type=int, default=10)
     parser.add_argument("--rollout-log-interval", type=int, default=40)
     parser.add_argument("--policy-device", default="cuda:0")
@@ -95,6 +122,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("train_batch_size must divide evenly into gradient accumulation steps.")
     if args.loss_normalization == "constant" and args.normalization_constant is None:
         args.normalization_constant = args.train_batch_size * args.sampling_max_tokens
+    if args.importance_reweighting_method == "grpo" and args.cliprange is None:
+        raise ValueError("cliprange is required for GRPO importance reweighting.")
 
 
 def evaluate(
@@ -158,6 +187,12 @@ def main() -> None:
                 rollout_prompts, sampling_params, batch_size=args.rollout_batch_size
             )
             responses = [completion.text for completion in completions]
+            old_log_probs = None
+            if args.importance_reweighting_method != "none":
+                policy.eval()
+                old_log_probs = get_old_response_log_probs(
+                    policy, tokenizer, rollout_prompts, responses
+                )
             policy.train()
             loss, train_metrics = grpo_train_step(
                 policy,
@@ -174,6 +209,9 @@ def main() -> None:
                 advantage_normalizer=args.advantage_normalizer,
                 loss_normalization=args.loss_normalization,
                 normalization_constant=args.normalization_constant,
+                importance_reweighting_method=args.importance_reweighting_method,
+                old_log_probs=old_log_probs,
+                cliprange=args.cliprange,
             )
             metrics: dict[str, Any] = {
                 "step": step,

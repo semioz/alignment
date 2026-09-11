@@ -245,6 +245,34 @@ def test_grpo_train_step_standard_on_policy(numpy_snapshot, tiny_train_model, to
     assert all(param.grad is None for param in tiny_train_model.parameters())
 
 
+def test_grpo_train_step_skips_all_zero_advantages(tiny_train_model, tokenizer, monkeypatch):
+    prompts, responses, ground_truths, _ = _train_step_inputs(tokenizer)
+    monkeypatch.setattr(
+        "cs336_alignment.grpo.get_response_log_probs",
+        lambda *args, **kwargs: pytest.fail("zero-advantage responses should not be scored"),
+    )
+
+    loss, metadata = grpo_train_step(
+        model=tiny_train_model,
+        tokenizer=tokenizer,
+        optimizer=_train_step_optimizer(tiny_train_model),
+        gradient_accumulation_steps=2,
+        max_grad_norm=1.0,
+        reward_fn=lambda response, ground_truth: {
+            "reward": 0.0,
+            "format_reward": 0.0,
+            "answer_reward": 0.0,
+        },
+        repeated_prompts=prompts,
+        rollout_responses=responses,
+        repeated_ground_truths=ground_truths,
+        group_size=2,
+    )
+
+    assert loss.item() == 0.0
+    assert metadata["grad_norm"].item() == 0.0
+
+
 @pytest.mark.parametrize(
     "variant_kwargs",
     [

@@ -69,10 +69,25 @@ def compute_policy_gradient_loss(
     cliprange: float | None = None,
     response_mask: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-    if importance_reweighting_method != "none":
-        raise NotImplementedError("Only on-policy loss without reweighting is supported.")
-    del old_log_probs, cliprange, response_mask
-    return -raw_rewards_or_advantages.reshape(-1, 1) * policy_log_probs, {}
+    advantages = raw_rewards_or_advantages.reshape(-1, 1)
+    if importance_reweighting_method == "none":
+        return -advantages * policy_log_probs, {}
+    if importance_reweighting_method not in ("noclip", "grpo"):
+        raise NotImplementedError(f"Unsupported reweighting method: {importance_reweighting_method}")
+    if old_log_probs is None:
+        raise ValueError("old_log_probs is required for off-policy reweighting.")
+
+    ratios = torch.exp(policy_log_probs - old_log_probs)
+    objective = ratios * advantages
+    if importance_reweighting_method == "grpo":
+        if cliprange is None:
+            raise ValueError("cliprange is required for GRPO clipping.")
+        objective = torch.minimum(
+            objective,
+            ratios.clamp(1 - cliprange, 1 + cliprange) * advantages,
+        )
+    del response_mask
+    return -objective, {}
 
 
 # A microbatch is a memory-sized subset of rollout responses and may contain multiple GRPO groups.
@@ -142,11 +157,16 @@ def grpo_train_step(
         log_prob_output = get_response_log_probs(
             model, input_ids, labels, return_token_entropy=True
         )
+        microbatch_old_log_probs = None
+        if old_log_probs is not None:
+            microbatch_old_log_probs = old_log_probs[start:end][
+                active, : input_ids.shape[1]
+            ].to(device)
         per_token_loss, _ = compute_policy_gradient_loss(
             microbatch_advantages[active].to(device),
             log_prob_output["log_probs"],
             importance_reweighting_method,
-            old_log_probs,
+            microbatch_old_log_probs,
             cliprange,
         )
         microbatch_loss = aggregate_loss_across_microbatch(
@@ -159,6 +179,16 @@ def grpo_train_step(
             (log_prob_output["token_entropy"] * response_mask).sum()
             / response_mask.sum()
         )
+
+    if not microbatch_losses:
+        zero = torch.zeros((), device=device)
+        return zero, {
+            **reward_metadata,
+            **advantage_metadata,
+            "loss": zero,
+            "grad_norm": zero,
+            "mean_token_entropy": zero,
+        }
 
     if max_grad_norm is None:
         grad_norm = torch.linalg.vector_norm(

@@ -21,24 +21,22 @@ def modal_main(*argv: str) -> None:
 
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 
 import modal
 
 
-SUNET_ID = "TODO"  # NOTE: modal_utils.py should remain unchanged other than adding your SUNET_ID.
-if SUNET_ID == "TODO":
-    raise ValueError("Please set SUNET_ID in cs336_alignment/modal_utils.py before running Modal jobs.")
-
+RUN_ID = os.environ.get("MODAL_APP_SUFFIX", "prompting-baselines")
 
 GPU = "B200:2"
 MAX_CONTAINERS = 4
 REMOTE_ROOT = "/root"
 RUN_TIMEOUT_SECONDS = 60 * 60
-WANDB_SECRET_NAME = "wandb"
+WANDB_SECRET_NAME = "wandb-secret"
 
-app = modal.App(f"cs336-a5-rlvr-{SUNET_ID}")
+app = modal.App(f"cs336-a5-rlvr-{RUN_ID}")
 wandb_secret = modal.Secret.from_name(WANDB_SECRET_NAME)
 
 image = (
@@ -50,14 +48,10 @@ image = (
     .workdir(REMOTE_ROOT)
     .add_local_dir("cs336_alignment", f"{REMOTE_ROOT}/cs336_alignment")
     .add_local_dir("data", f"{REMOTE_ROOT}/data")
-    .add_local_dir("experiments", f"{REMOTE_ROOT}/experiments")
     .add_local_dir("scripts", f"{REMOTE_ROOT}/scripts")
     .add_local_file("pyproject.toml", f"{REMOTE_ROOT}/pyproject.toml")
     .add_local_file("uv.lock", f"{REMOTE_ROOT}/uv.lock")
 )
-image = image.add_local_file("AGENTS.md", f"{REMOTE_ROOT}/AGENTS.md")
-image = image.add_local_file("CLAUDE.md", f"{REMOTE_ROOT}/CLAUDE.md")
-
 
 def quote_command(command: list[str]) -> str:
     return " ".join(shlex.quote(part) for part in command)
