@@ -86,7 +86,8 @@ def compute_policy_gradient_loss(
             ratios * advantages,
             ratios.clamp(1 - cliprange, 1 + cliprange) * advantages,
         )
-        return -objective.expand_as(policy_log_probs), {}
+        clip_fraction = ((ratios - 1).abs() > cliprange).float().mean()
+        return -objective.expand_as(policy_log_probs), {"clip_fraction": clip_fraction}
 
     ratios = torch.exp(policy_log_probs - old_log_probs)
     objective = ratios * advantages
@@ -97,6 +98,12 @@ def compute_policy_gradient_loss(
             objective,
             ratios.clamp(1 - cliprange, 1 + cliprange) * advantages,
         )
+        clipped = (ratios - 1).abs() > cliprange
+        if response_mask is not None:
+            clip_fraction = clipped[response_mask].float().mean()
+        else:
+            clip_fraction = clipped.float().mean()
+        return -objective, {"clip_fraction": clip_fraction}
     del response_mask
     return -objective, {}
 
@@ -151,6 +158,7 @@ def grpo_train_step(
     optimizer.zero_grad(set_to_none=True)
     microbatch_losses = []
     token_entropies = []
+    clip_fractions = []
 
     for start in range(0, len(rollout_responses), microbatch_size):
         end = start + microbatch_size
@@ -173,7 +181,7 @@ def grpo_train_step(
             microbatch_old_log_probs = old_log_probs[start:end][
                 active, : input_ids.shape[1]
             ].to(device)
-        per_token_loss, _ = compute_policy_gradient_loss(
+        per_token_loss, loss_metadata = compute_policy_gradient_loss(
             microbatch_advantages[active].to(device),
             log_prob_output["log_probs"],
             importance_reweighting_method,
@@ -181,6 +189,8 @@ def grpo_train_step(
             cliprange,
             response_mask,
         )
+        if "clip_fraction" in loss_metadata:
+            clip_fractions.append(loss_metadata["clip_fraction"].detach())
         microbatch_loss = aggregate_loss_across_microbatch(
             per_token_loss, response_mask, loss_normalization, normalization_constant
         )
@@ -217,4 +227,9 @@ def grpo_train_step(
         "loss": loss,
         "grad_norm": grad_norm,
         "mean_token_entropy": torch.stack(token_entropies).mean(),
+        **(
+            {"clip_fraction": torch.stack(clip_fractions).mean()}
+            if clip_fractions
+            else {}
+        ),
     }
